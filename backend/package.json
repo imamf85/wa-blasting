@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "concurrently --kill-others --names \"API,WORKERS\" --prefix-colors \"blue,green\" \"node src/index.js\" \"node src/workers/index.js\"",
     "dev": "concurrently --kill-others --names \"API,WORKERS\" --prefix-colors \"blue,green\" \"nodemon src/index.js\" \"node src/workers/index.js\"",
     "dev:api": "nodemon src/index.js",
     "dev:workers": "node src/workers/index.js",
@@ -23,6 +23,7 @@
     "@supabase/supabase-js": "^2.106.1",
     "axios": "^1.16.1",
     "bullmq": "^5.77.0",
+    "concurrently": "^9.2.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -33,7 +34,6 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
     "nodemon": "^3.1.14"
   }
 }
