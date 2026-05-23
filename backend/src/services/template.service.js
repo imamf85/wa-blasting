@@ -14,7 +14,7 @@ export function getGreeting(date = new Date()) {
 
   // If timezone env var exists, adjust hour
   if (timezone) {
-    const formatter = new Intl.DateTimeFormat('en-US', {
+    const formatter = new Intl.DateTimeFormat('id-ID', {
       hour: 'numeric',
       hour12: false,
       timeZone: timezone
