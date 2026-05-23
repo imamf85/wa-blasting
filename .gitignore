@@ -1,9 +1,25 @@
+<<<<<<< HEAD
+=======
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.production
+backend/.env
+frontend/.env
+
+>>>>>>> cc4999c (feat: add LiveProgress and SessionHealthCard components for real-time campaign and session monitoring)
 # Logs
 logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+<<<<<<< HEAD
 pnpm-debug.log*
 lerna-debug.log*
 
@@ -27,3 +43,44 @@ dist-ssr
 .env
 .env.local
 .env.production
+=======
+lerna-debug.log*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temp files
+*.tmp
+*.temp
+.cache/
+
+# Package manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+*.md
+>>>>>>> cc4999c (feat: add LiveProgress and SessionHealthCard components for real-time campaign and session monitoring)
