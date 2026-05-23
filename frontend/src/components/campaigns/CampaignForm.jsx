@@ -14,6 +14,11 @@ export function CampaignForm() {
     message_template: '',
     message_variations: '',
     sender_session_ids: [],
+    delay_min: 20,
+    delay_max: 90,
+    avoid_peak_hours: true,
+    peak_hours_start: '09:00',
+    peak_hours_end: '17:00',
   });
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
@@ -139,7 +144,12 @@ export function CampaignForm() {
         message_template: formData.message_template,
         message_variations: variations.length > 0 ? variations : [],
         sender_session_ids: formData.sender_session_ids,
-        attachment_url
+        attachment_url,
+        delay_min: parseInt(formData.delay_min),
+        delay_max: parseInt(formData.delay_max),
+        avoid_peak_hours: formData.avoid_peak_hours,
+        peak_hours_start: formData.peak_hours_start,
+        peak_hours_end: formData.peak_hours_end,
       };
 
       const response = await campaignsAPI.create(campaignData);
@@ -332,8 +342,111 @@ export function CampaignForm() {
             )}
           </div>
 
+          {/* Advanced Settings */}
+          <div className="border-t border-gray-200 pt-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Anti-Ban Settings
+            </h3>
+
+            {/* Delay Settings */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label htmlFor="delay_min" className="block text-sm font-medium text-gray-700 mb-2">
+                  Min Delay (seconds)
+                </label>
+                <input
+                  type="number"
+                  id="delay_min"
+                  name="delay_min"
+                  min="10"
+                  max="300"
+                  value={formData.delay_min}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label htmlFor="delay_max" className="block text-sm font-medium text-gray-700 mb-2">
+                  Max Delay (seconds)
+                </label>
+                <input
+                  type="number"
+                  id="delay_max"
+                  name="delay_max"
+                  min="10"
+                  max="300"
+                  value={formData.delay_max}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-6">
+              Random delay between messages (default: 20-90 seconds)
+            </p>
+
+            {/* Avoid Peak Hours Toggle */}
+            <div className="mb-4">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="avoid_peak_hours"
+                  checked={formData.avoid_peak_hours}
+                  onChange={(e) => setFormData(prev => ({ ...prev, avoid_peak_hours: e.target.checked }))}
+                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                />
+                <span className="ml-2 text-sm font-medium text-gray-700">
+                  Avoid sending during peak hours
+                </span>
+              </label>
+              <p className="ml-6 text-sm text-gray-500">
+                Recommended: Avoid busy hours to reduce ban risk
+              </p>
+            </div>
+
+            {/* Peak Hours Time Selection */}
+            {formData.avoid_peak_hours && (
+              <div className="ml-6 grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label htmlFor="peak_hours_start" className="block text-sm font-medium text-gray-700 mb-2">
+                    Peak Hours Start
+                  </label>
+                  <input
+                    type="time"
+                    id="peak_hours_start"
+                    name="peak_hours_start"
+                    value={formData.peak_hours_start}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="peak_hours_end" className="block text-sm font-medium text-gray-700 mb-2">
+                    Peak Hours End
+                  </label>
+                  <input
+                    type="time"
+                    id="peak_hours_end"
+                    name="peak_hours_end"
+                    value={formData.peak_hours_end}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+            )}
+
+            {formData.avoid_peak_hours && (
+              <div className="ml-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  ⚠️ Messages will be queued during peak hours ({formData.peak_hours_start} - {formData.peak_hours_end}) and sent after.
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Sender Sessions Selection */}
-          <div>
+          <div className="border-t border-gray-200 pt-6">
             <label className="block text-sm font-medium text-gray-700 mb-3">
               Select WhatsApp Sessions * (Choose at least one)
             </label>
