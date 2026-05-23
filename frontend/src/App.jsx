@@ -7,6 +7,9 @@ import Dashboard from './components/dashboard/Dashboard';
 import CampaignList from './components/campaigns/CampaignList';
 import CampaignForm from './components/campaigns/CampaignForm';
 import CampaignDetail from './components/campaigns/CampaignDetail';
+import SessionList from './components/sessions/SessionList';
+import SessionForm from './components/sessions/SessionForm';
+import SessionDetail from './components/sessions/SessionDetail';
 
 function App() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -45,18 +48,11 @@ function App() {
           <Route path="campaigns/new" element={<CampaignForm />} />
           <Route path="campaigns/:id" element={<CampaignDetail />} />
 
-          {/* Placeholder routes */}
-          <Route
-            path="sessions"
-            element={
-              <div className="text-center py-12">
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">
-                  Sessions Management
-                </h2>
-                <p className="text-gray-500">Coming soon...</p>
-              </div>
-            }
-          />
+          {/* Sessions routes */}
+          <Route path="sessions" element={<SessionList />} />
+          <Route path="sessions/new" element={<SessionForm />} />
+          <Route path="sessions/:id" element={<SessionDetail />} />
+          <Route path="sessions/:id/edit" element={<SessionForm />} />
 
           <Route
             path="settings"
