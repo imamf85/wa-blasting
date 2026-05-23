@@ -3,14 +3,13 @@ import WAHAService from './waha.service.js';
 import { formatPhoneForWAHA } from '../utils/phoneFormatter.js';
 import logger from '../utils/logger.js';
 
-/**
- * Report Service
- * Generates and sends reports to admin WhatsApp
- */
+const options = {
+  timeZone: 'Asia/Jakarta',
+  dateStyle: 'full',
+  timeStyle: 'long',
+  hour12: false
+};
 
-/**
- * Get admin WhatsApp number from system settings
- */
 async function getAdminWhatsApp() {
   try {
     const { data, error } = await supabase
@@ -139,7 +138,7 @@ function formatCampaignStartReport(campaign, stats) {
 • Delay Range: ${campaign.delay_min}-${campaign.delay_max}s
 • Peak Hours Avoidance: ${campaign.avoid_peak_hours ? 'Yes' : 'No'}
 
-⏰ *Started:* ${new Date().toLocaleString()}
+⏰ *Started:* ${new Date().toLocaleString('id-ID', options)}
 
 ${estimateDuration(stats.total, campaign.delay_min, campaign.delay_max)}
 
@@ -155,9 +154,9 @@ function formatCampaignCompleteReport(campaign, stats) {
 
   const duration = campaign.started_at && campaign.completed_at
     ? formatDuration(
-        new Date(campaign.started_at),
-        new Date(campaign.completed_at)
-      )
+      new Date(campaign.started_at),
+      new Date(campaign.completed_at)
+    )
     : 'N/A';
 
   return `${emoji} *Campaign Completed*
@@ -172,13 +171,13 @@ function formatCampaignCompleteReport(campaign, stats) {
 
 ⏱️ *Duration:* ${duration}
 
-⏰ *Completed:* ${new Date().toLocaleString()}
+⏰ *Completed:* ${new Date().toLocaleString('id-ID', options)}
 
 ${successRate >= 95
-  ? '🎉 Excellent delivery rate!'
-  : successRate >= 85
-    ? '✓ Good delivery rate. Check failed messages if needed.'
-    : '⚠️ Lower than expected success rate. Please review error logs.'}`;
+      ? '🎉 Excellent delivery rate!'
+      : successRate >= 85
+        ? '✓ Good delivery rate. Check failed messages if needed.'
+        : '⚠️ Lower than expected success rate. Please review error logs.'}`;
 }
 
 /**
@@ -205,7 +204,7 @@ The session has been automatically paused to prevent further issues. Pending mes
 2. Review error logs
 3. Session will auto-resume after daily reset (midnight)
 
-⏰ *Time:* ${new Date().toLocaleString()}`;
+⏰ *Time:* ${new Date().toLocaleString('id-ID', options)}`;
 }
 
 /**
@@ -227,7 +226,7 @@ function formatHighErrorAlert(session, errorCount) {
 🔍 *Recommendation:*
 Please check the session connection and WAHA logs for details.
 
-⏰ *Time:* ${new Date().toLocaleString()}`;
+⏰ *Time:* ${new Date().toLocaleString('id-ID', options)}`;
 }
 
 /**
@@ -240,7 +239,15 @@ function formatDailySummary(stats) {
 
   return `📊 *Daily Summary Report*
 
-📅 *Date:* ${new Date().toLocaleDateString()}
+📅 *Date:* ${new Date().toLocaleDateString(
+    'id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  }
+  )}
 
 📈 *Messages:*
 • Total Sent: ${stats.sent.toLocaleString()}
@@ -260,7 +267,7 @@ function formatDailySummary(stats) {
 💬 *Top Performing Session:*
 ${stats.topSession ? `${stats.topSession.name} - ${stats.topSession.sent} messages` : 'N/A'}
 
-⏰ *Generated:* ${new Date().toLocaleString()}`;
+⏰ *Generated:* ${new Date().toLocaleString('id-ID', options)}`;
 }
 
 /**
