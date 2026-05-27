@@ -83,4 +83,5 @@ yarn.lock
 pnpm-lock.yaml
 
 *.md
+*.sql
 >>>>>>> cc4999c (feat: add LiveProgress and SessionHealthCard components for real-time campaign and session monitoring)

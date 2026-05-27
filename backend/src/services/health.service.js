@@ -532,10 +532,244 @@ export async function verifyWAHAConnection(sessionId) {
   }
 }
 
+/**
+ * Check if session needs to rest based on consecutive messages sent
+ */
+export async function checkIfNeedsRest(sessionId) {
+  try {
+    const { data: session } = await supabase
+      .from('waha_sessions')
+      .select('consecutive_messages_sent, is_resting, rest_until')
+      .eq('id', sessionId)
+      .single();
+
+    if (!session) {
+      return { needsRest: false, reason: 'Session not found' };
+    }
+
+    // Already resting
+    if (session.is_resting) {
+      return { needsRest: true, reason: 'Already resting', restUntil: session.rest_until };
+    }
+
+    // Get rest threshold from settings
+    const { data: settings } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'rest_after_messages')
+      .single();
+
+    const restThreshold = settings ? parseInt(settings.value) : 25;
+
+    // Check if reached threshold
+    if (session.consecutive_messages_sent >= restThreshold) {
+      return {
+        needsRest: true,
+        reason: `Reached threshold: ${session.consecutive_messages_sent}/${restThreshold} messages`,
+        consecutiveSent: session.consecutive_messages_sent
+      };
+    }
+
+    return { needsRest: false, consecutiveSent: session.consecutive_messages_sent };
+  } catch (error) {
+    logger.error('Failed to check if session needs rest', {
+      sessionId,
+      error: error.message
+    });
+    return { needsRest: false, error: error.message };
+  }
+}
+
+/**
+ * Trigger resting period for a session
+ */
+export async function triggerSessionRest(sessionId, reason = 'Consecutive messages limit reached') {
+  try {
+    logger.info('Triggering session rest', { sessionId, reason });
+
+    // Get rest duration from settings (random between min and max)
+    const { data: minSettings } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'rest_duration_min')
+      .single();
+
+    const { data: maxSettings } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'rest_duration_max')
+      .single();
+
+    const minDuration = minSettings ? parseInt(minSettings.value) : 30;
+    const maxDuration = maxSettings ? parseInt(maxSettings.value) : 60;
+
+    // Random rest duration between min and max
+    const restDuration = Math.floor(Math.random() * (maxDuration - minDuration + 1)) + minDuration;
+
+    // Use database function to trigger rest
+    const { error } = await supabase.rpc('trigger_session_rest', {
+      p_session_id: sessionId,
+      p_rest_duration_minutes: restDuration
+    });
+
+    if (error) {
+      logger.error('Failed to trigger session rest via RPC', { sessionId, error });
+      throw error;
+    }
+
+    // Get session details for notification
+    const { data: session } = await supabase
+      .from('waha_sessions')
+      .select('session_name, phone_number, consecutive_messages_sent, rest_until')
+      .eq('id', sessionId)
+      .single();
+
+    logger.info('Session rest triggered successfully', {
+      sessionId,
+      sessionName: session?.session_name,
+      phoneNumber: session?.phone_number,
+      restDuration,
+      restUntil: session?.rest_until,
+      messagesSent: session?.consecutive_messages_sent
+    });
+
+    // Emit SSE event
+    broadcast('session_resting', {
+      sessionId,
+      sessionName: session?.session_name,
+      phoneNumber: session?.phone_number,
+      reason,
+      restDuration,
+      restUntil: session?.rest_until
+    });
+
+    // Redistribute pending messages from this session
+    await redistributePendingMessages(sessionId);
+
+    return {
+      success: true,
+      restDuration,
+      restUntil: session?.rest_until
+    };
+  } catch (error) {
+    logger.error('Failed to trigger session rest', {
+      sessionId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Resume session from resting period
+ */
+export async function resumeFromRest(sessionId) {
+  try {
+    logger.info('Resuming session from rest', { sessionId });
+
+    // Use database function to resume
+    const { error } = await supabase.rpc('resume_session_from_rest', {
+      p_session_id: sessionId
+    });
+
+    if (error) {
+      logger.error('Failed to resume session via RPC', { sessionId, error });
+      throw error;
+    }
+
+    // Get session details
+    const { data: session } = await supabase
+      .from('waha_sessions')
+      .select('session_name, phone_number, is_resting')
+      .eq('id', sessionId)
+      .single();
+
+    if (session && !session.is_resting) {
+      logger.info('Session resumed from rest successfully', {
+        sessionId,
+        sessionName: session.session_name,
+        phoneNumber: session.phone_number
+      });
+
+      // Emit SSE event
+      broadcast('session_resumed_from_rest', {
+        sessionId,
+        sessionName: session.session_name,
+        phoneNumber: session.phone_number,
+        reason: 'Rest period completed'
+      });
+
+      return { success: true };
+    }
+
+    return { success: false, reason: 'Session not eligible for resume' };
+  } catch (error) {
+    logger.error('Failed to resume session from rest', {
+      sessionId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Auto-resume all sessions whose rest period has ended
+ * Called by scheduled worker
+ */
+export async function autoResumeRestingSessions() {
+  try {
+    logger.info('Checking for sessions to auto-resume from rest');
+
+    // Use database function to resume all eligible sessions
+    const { data: resumedSessions, error } = await supabase.rpc('auto_resume_resting_sessions');
+
+    if (error) {
+      logger.error('Failed to auto-resume resting sessions', { error });
+      throw error;
+    }
+
+    if (!resumedSessions || resumedSessions.length === 0) {
+      logger.debug('No sessions to auto-resume');
+      return { resumedCount: 0, sessions: [] };
+    }
+
+    logger.info('Auto-resumed sessions from rest', {
+      count: resumedSessions.length,
+      sessions: resumedSessions.map(s => ({
+        id: s.resumed_session_id,
+        name: s.session_name,
+        phone: s.phone_number
+      }))
+    });
+
+    // Emit SSE events for each resumed session
+    for (const session of resumedSessions) {
+      broadcast('session_resumed_from_rest', {
+        sessionId: session.resumed_session_id,
+        sessionName: session.session_name,
+        phoneNumber: session.phone_number,
+        reason: 'Auto-resumed after rest period'
+      });
+    }
+
+    return {
+      resumedCount: resumedSessions.length,
+      sessions: resumedSessions
+    };
+  } catch (error) {
+    logger.error('Failed to auto-resume resting sessions', { error: error.message });
+    throw error;
+  }
+}
+
 export default {
   checkSessionHealth,
   calculateHealthScore,
   checkAllSessions,
   resetDailyCounters,
-  verifyWAHAConnection
+  verifyWAHAConnection,
+  checkIfNeedsRest,
+  triggerSessionRest,
+  resumeFromRest,
+  autoResumeRestingSessions
 };

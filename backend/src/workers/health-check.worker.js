@@ -2,7 +2,7 @@ import { Worker } from 'bullmq';
 import cron from 'node-cron';
 import redis from '../config/redis.js';
 import { healthQueue } from '../config/bull.js';
-import { checkAllSessions, resetDailyCounters } from '../services/health.service.js';
+import { checkAllSessions, resetDailyCounters, autoResumeRestingSessions } from '../services/health.service.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -36,6 +36,16 @@ const worker = new Worker(
 
         logger.info('Daily counters reset', {
           resumedSessions: result.resumedSessions
+        });
+
+        return result;
+      } else if (type === 'auto_resume_resting') {
+        // Auto-resume sessions whose rest period has ended
+        const result = await autoResumeRestingSessions();
+
+        logger.info('Auto-resume resting sessions completed', {
+          resumedCount: result.resumedCount,
+          sessions: result.sessions
         });
 
         return result;
@@ -120,11 +130,33 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
+// Schedule auto-resume check for resting sessions
+// Every 2 minutes (check if any session's rest period has ended)
+cron.schedule('*/2 * * * *', async () => {
+  logger.debug('Triggering auto-resume check for resting sessions');
+
+  try {
+    await healthQueue.add(
+      'auto_resume_resting',
+      { type: 'auto_resume_resting' },
+      {
+        removeOnComplete: {
+          count: 100,
+          age: 3600 // 1 hour
+        }
+      }
+    );
+  } catch (error) {
+    logger.error('Failed to schedule auto-resume check', { error: error.message });
+  }
+});
+
 logger.info('✓ Health check worker started', {
   queue: 'health',
   schedules: [
     'Health check: Every 5 minutes',
-    'Daily reset: Every day at 00:00'
+    'Daily reset: Every day at 00:00',
+    'Auto-resume resting sessions: Every 2 minutes'
   ]
 });
 

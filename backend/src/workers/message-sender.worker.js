@@ -6,6 +6,7 @@ import { renderMessage } from '../services/template.service.js';
 import { formatPhoneForWAHA } from '../utils/phoneFormatter.js';
 import { emitToCampaign } from '../websocket/sse.js';
 import { sendCampaignCompleteReport } from '../services/report.service.js';
+import { checkIfNeedsRest, triggerSessionRest } from '../services/health.service.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -125,16 +126,17 @@ const worker = new Worker(
         })
         .eq('id', contactId);
 
-      // 7. Increment session message counter
+      // 7. Increment session message counter AND consecutive counter
       await supabase.rpc('increment_session_counter', {
         session_id: sessionId
       });
 
-      // Alternative if RPC doesn't exist: direct update
+      // Alternative if RPC doesn't exist: direct update with consecutive counter
       await supabase
         .from('waha_sessions')
         .update({
           messages_sent_today: session.messages_sent_today + 1,
+          consecutive_messages_sent: (session.consecutive_messages_sent || 0) + 1,
           last_message_at: new Date().toISOString()
         })
         .eq('id', sessionId);
@@ -169,13 +171,32 @@ const worker = new Worker(
         wahaMessageId: wahaResponse.id
       });
 
-      // 11. Check if campaign is complete
+      // 11. Check if session needs to rest (after successful send)
+      const restCheck = await checkIfNeedsRest(sessionId);
+      if (restCheck.needsRest && !restCheck.error) {
+        logger.info('Session needs rest after sending messages', {
+          sessionId,
+          consecutiveSent: restCheck.consecutiveSent,
+          reason: restCheck.reason
+        });
+
+        // Trigger resting period (async, don't wait)
+        triggerSessionRest(sessionId, restCheck.reason).catch(error => {
+          logger.error('Failed to trigger session rest', {
+            sessionId,
+            error: error.message
+          });
+        });
+      }
+
+      // 12. Check if campaign is complete
       await checkCampaignCompletion(campaignId);
 
       logger.info('Message job completed successfully', {
         jobId: job.id,
         contactId,
-        sessionId
+        sessionId,
+        consecutiveMessagesSent: (session.consecutive_messages_sent || 0) + 1
       });
 
       return {
@@ -203,9 +224,9 @@ const worker = new Worker(
   },
   {
     connection: redis,
-    concurrency: 5, // Process up to 5 jobs simultaneously
+    concurrency: 1, // Process 1 job at a time (safer for anti-ban)
     limiter: {
-      max: 10, // Max 10 jobs per duration
+      max: 5, // Max 5 jobs per duration (reduced from 10)
       duration: 60000 // Per minute (global rate limiting)
     }
   }

@@ -83,13 +83,14 @@ export async function startCampaign(campaignId) {
  * Uses weighted round-robin based on health and quota
  */
 export async function distributeContacts(contacts, campaign) {
-  // Get available sessions
+  // Get available sessions (exclude resting sessions)
   const { data: sessions, error: sessionsError } = await supabase
     .from('waha_sessions')
-    .select('id, phone_number, status, health_score, messages_sent_today, daily_quota')
+    .select('id, phone_number, status, health_score, messages_sent_today, daily_quota, is_resting, rest_until, consecutive_messages_sent')
     .in('id', campaign.sender_session_ids)
     .eq('status', 'connected')
-    .neq('status', 'paused');
+    .neq('status', 'paused')
+    .eq('is_resting', false); // Exclude resting sessions
 
   if (sessionsError || !sessions || sessions.length === 0) {
     throw new Error('No available sessions found');
