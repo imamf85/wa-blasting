@@ -1,4 +1,4 @@
-import { Worker } from 'bullmq';
+import { Worker, Queue } from 'bullmq';
 import redis from '../config/redis.js';
 import supabase from '../config/supabase.js';
 import WAHAService from '../services/waha.service.js';
@@ -8,6 +8,9 @@ import { emitToCampaign } from '../websocket/sse.js';
 import { sendCampaignCompleteReport } from '../services/report.service.js';
 import { checkIfNeedsRest, triggerSessionRest } from '../services/health.service.js';
 import logger from '../utils/logger.js';
+
+// Initialize message queue for re-queuing
+const messageQueue = new Queue('messages', { connection: redis });
 
 /**
  * Message Sender Worker
@@ -43,6 +46,55 @@ const worker = new Worker(
       }
 
       // 2. Pre-flight checks
+
+      // Check if session is resting - RE-QUEUE job instead of failing
+      if (session.is_resting && session.rest_until) {
+        const restUntil = new Date(session.rest_until);
+        const now = new Date();
+
+        if (restUntil > now) {
+          const delayMs = restUntil.getTime() - now.getTime() + 120000; // Add 2 min buffer
+
+          logger.info('Session is resting, re-queuing job with delay', {
+            sessionId,
+            contactId,
+            restUntil: session.rest_until,
+            delayMinutes: Math.ceil(delayMs / 60000)
+          });
+
+          // Keep contact as 'queued'
+          await supabase
+            .from('contacts')
+            .update({ status: 'queued' })
+            .eq('id', contactId);
+
+          // Re-queue job with delay
+          await messageQueue.add(
+            'send_message',
+            { contactId, sessionId, campaignId },
+            {
+              delay: delayMs,
+              removeOnComplete: { count: 100, age: 3600 },
+              removeOnFail: { count: 100 }
+            }
+          );
+
+          logger.info('Job re-queued successfully', {
+            contactId,
+            sessionId,
+            delayMinutes: Math.ceil(delayMs / 60000)
+          });
+
+          // Return success (job handled by re-queuing)
+          return {
+            success: true,
+            requeued: true,
+            reason: 'session_resting',
+            delayMs
+          };
+        }
+      }
+
       if (session.status !== 'connected') {
         throw new Error(`Session not connected: ${session.status}`);
       }

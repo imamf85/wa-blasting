@@ -656,6 +656,20 @@ export async function triggerSessionRest(sessionId, reason = 'Consecutive messag
     // Redistribute pending messages from this session
     await redistributePendingMessages(sessionId);
 
+    // Check if any campaigns should be auto-paused (all sessions resting)
+    // Get all campaigns using this session
+    const { data: campaigns } = await supabase
+      .from('campaigns')
+      .select('id')
+      .contains('sender_session_ids', [sessionId])
+      .eq('status', 'active');
+
+    if (campaigns && campaigns.length > 0) {
+      for (const campaign of campaigns) {
+        await checkCampaignAutoPause(campaign.id);
+      }
+    }
+
     return {
       success: true,
       restDuration,
@@ -762,13 +776,175 @@ export async function autoResumeRestingSessions() {
       });
     }
 
+    // Auto-resume campaigns that were paused due to all sessions resting
+    const campaignResumeResult = await autoResumeCampaignsAfterRest();
+
+    logger.info('Session and campaign auto-resume complete', {
+      sessionsResumed: resumedSessions.length,
+      campaignsResumed: campaignResumeResult.resumedCount
+    });
+
     return {
       resumedCount: resumedSessions.length,
-      sessions: resumedSessions
+      sessions: resumedSessions,
+      campaignsResumed: campaignResumeResult.resumedCount,
+      campaigns: campaignResumeResult.campaigns
     };
   } catch (error) {
     logger.error('Failed to auto-resume resting sessions', { error: error.message });
     throw error;
+  }
+}
+
+/**
+ * Check if campaign should be auto-paused due to all sessions resting
+ */
+export async function checkCampaignAutoPause(campaignId) {
+  try {
+    const { data: campaign } = await supabase
+      .from('campaigns')
+      .select('sender_session_ids, status')
+      .eq('id', campaignId)
+      .single();
+
+    if (!campaign || campaign.status !== 'active') {
+      return { shouldPause: false };
+    }
+
+    if (!campaign.sender_session_ids || campaign.sender_session_ids.length === 0) {
+      return { shouldPause: false };
+    }
+
+    // Check all sender sessions
+    const { data: sessions } = await supabase
+      .from('waha_sessions')
+      .select('id, is_resting, status')
+      .in('id', campaign.sender_session_ids);
+
+    if (!sessions || sessions.length === 0) {
+      return { shouldPause: false };
+    }
+
+    // Check if ALL sessions are resting or not connected
+    const allResting = sessions.every(s => s.is_resting === true || s.status !== 'connected');
+
+    if (allResting) {
+      logger.info('All campaign sessions are resting - auto-pausing campaign', {
+        campaignId,
+        sessionsCount: sessions.length
+      });
+
+      // Pause campaign
+      await supabase
+        .from('campaigns')
+        .update({
+          status: 'paused',
+          paused_at: new Date().toISOString(),
+          pause_reason: 'Auto-paused: All sender sessions are resting'
+        })
+        .eq('id', campaignId);
+
+      // Emit SSE event
+      broadcast('campaign_paused', {
+        campaignId,
+        reason: 'All sender sessions resting'
+      });
+
+      return { shouldPause: true, reason: 'all_sessions_resting' };
+    }
+
+    return { shouldPause: false };
+  } catch (error) {
+    logger.error('Failed to check campaign auto-pause', {
+      campaignId,
+      error: error.message
+    });
+    return { shouldPause: false, error: error.message };
+  }
+}
+
+/**
+ * Auto-resume campaigns that were paused due to all sessions resting
+ */
+export async function autoResumeCampaignsAfterRest() {
+  try {
+    logger.info('Checking for campaigns to auto-resume after sessions rest');
+
+    // Find campaigns paused due to "all sessions resting"
+    const { data: campaigns, error } = await supabase
+      .from('campaigns')
+      .select('id, sender_session_ids, name')
+      .eq('status', 'paused')
+      .ilike('pause_reason', '%All sender sessions are resting%');
+
+    if (error) {
+      logger.error('Failed to fetch paused campaigns', { error });
+      return { resumedCount: 0, campaigns: [] };
+    }
+
+    if (!campaigns || campaigns.length === 0) {
+      logger.debug('No campaigns waiting for session resume');
+      return { resumedCount: 0, campaigns: [] };
+    }
+
+    const resumedCampaigns = [];
+
+    for (const campaign of campaigns) {
+      // Check if any session is now available (not resting, connected)
+      const { data: sessions } = await supabase
+        .from('waha_sessions')
+        .select('id, is_resting, status')
+        .in('id', campaign.sender_session_ids);
+
+      const hasAvailableSession = sessions?.some(
+        s => s.is_resting === false && s.status === 'connected'
+      );
+
+      if (hasAvailableSession) {
+        logger.info('Resuming campaign - sessions now available', {
+          campaignId: campaign.id,
+          campaignName: campaign.name
+        });
+
+        // Resume campaign
+        await supabase
+          .from('campaigns')
+          .update({
+            status: 'active',
+            paused_at: null,
+            pause_reason: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', campaign.id);
+
+        // Emit SSE event
+        broadcast('campaign_resumed', {
+          campaignId: campaign.id,
+          campaignName: campaign.name,
+          reason: 'Sessions resumed from rest'
+        });
+
+        resumedCampaigns.push({
+          id: campaign.id,
+          name: campaign.name
+        });
+      }
+    }
+
+    if (resumedCampaigns.length > 0) {
+      logger.info('Auto-resumed campaigns', {
+        count: resumedCampaigns.length,
+        campaigns: resumedCampaigns
+      });
+    }
+
+    return {
+      resumedCount: resumedCampaigns.length,
+      campaigns: resumedCampaigns
+    };
+  } catch (error) {
+    logger.error('Failed to auto-resume campaigns', { error: error.message });
+    return { resumedCount: 0, campaigns: [], error: error.message };
   }
 }
 
@@ -781,5 +957,7 @@ export default {
   checkIfNeedsRest,
   triggerSessionRest,
   resumeFromRest,
-  autoResumeRestingSessions
+  autoResumeRestingSessions,
+  checkCampaignAutoPause,
+  autoResumeCampaignsAfterRest
 };
