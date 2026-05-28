@@ -375,12 +375,22 @@ export async function checkAllSessions() {
 
     if (error) {
       logger.error('Failed to fetch sessions', { error });
-      return;
+      return {
+        totalChecked: 0,
+        autoPaused: 0,
+        avgHealthScore: 1.0,
+        results: []
+      };
     }
 
     if (!sessions || sessions.length === 0) {
       logger.debug('No connected sessions to check');
-      return;
+      return {
+        totalChecked: 0,
+        autoPaused: 0,
+        avgHealthScore: 1.0,
+        results: []
+      };
     }
 
     logger.info(`Checking ${sessions.length} sessions`);
